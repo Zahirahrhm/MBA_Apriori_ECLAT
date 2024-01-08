@@ -1,0 +1,453 @@
+---
+title: "Analisis Bakul Pembeilan [Market Basket Analysis]"
+author: "Nurul Irdina Zahirah Binti Abd Rahim"
+date: "2023-10-13"
+output:
+  html_document: default
+  pdf_document: default
+---
+## 1. Pemuatan Data 
+
+#### 1.1 Memuat naik data yang diperoleh daripada laman web Kaggle (https://www.kaggle.com/datasets/hunter0007/ecommerce-dataset-for-predictive-marketing-2023/data) ke dalam R dan namakan data tersebut sebagai "hunter".
+
+```{r}
+# Tukarkan lokasi fail mengikut nama yang ditetapkan di dalam komputer anda
+load("/Users/zahirahrahim/Documents/FYP/FYP_code/Data/FYP_Zahirah.RData")
+
+# Buat salinan data tersebut ke dalam pemboleh ubah "hunter"
+hunter<- dat
+
+# Jika data anda dalam bentuk fail csv.
+# hunter<- read.csv(file.choose(), header = T)
+
+# Untuk memaparkan 6  baris data pertama
+head(hunter)
+
+# Untuk memaparkan saiz setiap pemboleh ubah
+sapply(hunter, function(x) length(unique(x)))
+```
+***
+
+## 2. Pemuatan "library" yang akan digunakan
+
+```{r}
+library(arules)
+library(arulesViz)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+```
+***
+
+## 3. Pembersihan data
+
+#### 3.1 Pembuangan pemboleh ubah yang tidak digunakan dalam analisis 
+
+```{r}
+hunter_c <- hunter[, -c(2,3,6,7,8,10)]
+```
+
+#### 3.2 Pembuangan produk yang tidak dapat dikenalpasti dan hilang dalam setiap data transaksi 
+
+> Di dalam set data transaksi Hunter's e-grocery, terdapat beberapa produk yang tidak dapat dikenalpasti dan telah dinamakan sebagai "missing" dan "other". Oleh kerana, kita tidak berminat untuk mencari hubungan diantara produk tersebut dengan produk lain kita perlulah membuangnya daripada set data.
+
+```{r}
+# Untuk membuang produk yang hilang 
+hunter_c <- hunter_c[!(hunter_c$product_name=='missing'),]
+
+# Untuk membuang produk yang tidak dapat dikenalpasti
+hunter_c <- hunter_c[!(hunter_c$product_name=='other'),]
+
+# Untuk membuang baris data yang tidak lengkap
+hunter_c[is.na(hunter_c)]<- 0
+
+# Untuk memparkan 6 baris pertama data
+head(hunter_c)
+
+# Untuk memaparkan saiz setiap pemboleh ubah selepas proses pembersihan data
+sapply(hunter_c, function(x) length(unique(x)))
+```
+***
+## 4. Penyediaan Data
+
+#### 4.1 Penyediaan data bagi Analisis Penerokaan Data
+
+> Bagi analisis penerokaan data yang akan dilaksanakan keatas pembolehubah "order_id", "order_dow", dan "order_hour_of_day", setiap baris data perlu dikelaskan mengikut ID pesanan (order_id). Hal ini adalah supaya bilangan pesanan bagi setiap hari dan masa pembelian dapat dihitung dengan tepat.
+
+```{r}
+# Untuk mengelaskan data mengikut ID pesanan (order_id)
+hunter_EDA<- hunter_c %>% 
+  group_by(order_id, order_dow, order_hour_of_day) %>% 
+  summarise(item = paste(product_name, collapse = ","))
+
+# Untuk memaparkan 6 baris pertama data
+head(hunter_EDA)
+```
+
+#### 4.2 Penyediaan data bagi analisis bakul pembelian
+
+> Untuk menggunakan command "apriori()" dan "eclat()" bagi melaksanakan analisis bakul pembelian, data set "hunter" perlu ditukarkan kepada bentuk transaksi menggunakan perintah as() yang disediakan di dalam pakej arules.
+
+```{r}
+# Pecahkan data mengikut order ID dan nama produk 
+hunter_gr <- split(hunter_c$product_name, hunter_c$order_id)
+head(hunter_gr)
+
+# Tukarkan data kepada bentuk transaksi menggunakan pakej arules 
+hunter_trans <- as(hunter_gr, "transactions")
+inspect(head(hunter_trans, 6))
+```
+***
+## 5. Analisis Penerokaan data
+> Analisis ini dilaksanakan untuk memahami corak dan isi kandungan data dengan lebih mendalam.
+
+#### 5.1 Bilangan transaksi pembelian pelanggan mengikut hari 
+```{r}
+# Untuk memaparkan bilangan transaksi pembelian pelanggan mengikut hari
+hunter_day<- table(hunter_EDA$order_dow)
+
+# Pemvisualan bilangan transaksi pembelian pelanggan mengikut hari [Carta pie]
+days <- paste(c("Isnin", "Selasa", "Rabu","Khamis", "Jumaat", "Sabtu", "Ahad"), "  | ", (round((hunter_day/199954)*100,1)), "%", sep="")
+pie(hunter_day, labels = days, main =" Bilangan transaksi pembelian pelanggan mengikut hari", col = rainbow(length(hunter_day)))
+```
+
+```{r}
+# Pemvisualan bilangan transaksi pembelian pelanggan mengikut hari [Carta bar]
+barplot(hunter_day,
+main = "Bilangan transaksi pembelian pelanggan mengikut hari",
+xlab = "Hari",
+ylab = "Bilangan Transaksi",
+names.arg = c("Isnin", "Selasa", "Rabu","Khamis", "Jumaat", "Sabtu", "Ahad"),
+col = rainbow(length(hunter_day)),
+horiz = FALSE)
+```
+
+#### 5.2 Bilangan transaksi pelanggan mengikut masa
+```{r}
+# 
+hunter_EDAt<- hunter_EDA[,c(1,3)]
+
+# Kelaskan masa kepada Pagi, Tengahhari, Petang dan Malam
+hunter_EDAt$Masa <- cut(hunter_EDAt$order_hour_of_day, breaks = c(-Inf,4,11,14,19,Inf), 
+                  labels = c("Malam","Pagi","Tengahhari","Petang","Malam"))
+
+# Untuk memaparkan 6 data teratas
+head(hunter_EDAt)
+
+# Untuk memaparkan bilangan transaksi pembelian pelanggan mengikut masa
+hunter_time<-table(hunter_EDAt$Masa)
+
+# Pemvisualan bilangan transaksi pembelian pelanggan mengikut masa [Carta pie]
+time <- paste(c("Malam", "Pagi", "Tengahhari","Petang"), "  | ", (round((hunter_time/199954)*100,1)), "%", sep="")
+pie(hunter_time, labels=time, main ="Bilangan transaksi pembelian pelanggan mengikut masa", col = rainbow(length(hunter_time)))
+```
+
+```{r}
+# Pemvisualan bilangan transaksi pembelian pelanggan mengikut masa [Carta bar]
+barplot(table(hunter_EDAt$order_hour_of_day),
+main = "Bilangan transaksi pembelian pelanggan mengikut masa",
+xlab = "Masa",
+ylab = "Bilangan Transaksi",
+names.arg = names(hunter_EDAt$order_hour_of_day),
+col = rainbow(length(table(hunter_EDAt$order_hour_of_day))),
+horiz = FALSE)
+```
+
+```{r}
+# Pemvisualan bilangan transaksi pembelian pelanggan mengikut masa [0000-2300] [Carta bar]
+hunter_EDAt %>%
+  # Kelaskan data mengikut masa
+  group_by(Masa) %>% 
+  # Hitung bilangan pembelian bagi setiap kumpulan masa 
+  summarize(count = n(), .groups = "drop") %>% 
+  # Susun data dalam turutan menurun
+  arrange(desc(count)) %>% 
+  # Bina suatu carta bar
+  ggplot(aes(
+    # Susun semula masa mengikut bilangannya
+    x = reorder(Masa, count),
+    y = count
+  )) +
+  # Warnakan setiap bar dengan warna yang berlainan
+  geom_bar(stat = "identity", fill = rainbow(length(hunter_time)), color ="black") +
+  # Tambahkan tajuk pada carta
+  labs(title = "Bilangan transaksi pelanggan mengikut masa", x = "", y = "Bilangan transaksi") +
+  # Paparkan carta bar dalam bentuk melintang
+  coord_flip()
+```
+
+```{r}
+# Untuk memaparkan bilangan pembelian produk mengikut kategori dan nama produk
+hunter_depit<- hunter_c %>% 
+  group_by(department,product_name) %>% 
+  # Calculate the count of each group and drop the grouping
+  summarize(count = n(), .groups = "drop")
+hunter_depit
+
+# Untuk memaparkan bilangan pembelian produk mengikut kategori produk
+hunter_dep <- table(hunter_c$department)
+hunter_dep
+```
+#### 5.3 Bilangan pembelian mengikut kategori produk
+```{r}
+hunter_c %>%
+  # Kelaskan data mengikut kategori produk
+  group_by(department) %>% 
+  # Hitung bilangan pembelian bagi setiap kumpulan kategori produk
+  summarize(count = n(), .groups = "drop") %>% 
+  # Susun data dalam turutan menurun
+  arrange(desc(count)) %>% 
+  # Bina suatu carta bar
+  ggplot(aes(
+    # Susun semula kategori produk mengikut bilangannya
+    x = reorder(department, count),
+    y = count
+  )) +
+  # Warnakan setiap bar dengan warna yang berlainan
+  geom_bar(stat = "identity", fill = rainbow(length(hunter_dep)), color ="black") +
+  # Tambahkan tajuk pada carta
+  labs(title = "Bilangan pembelian mengikut kategori produk", x = "", y = "Bilangan Pembelian") +
+  # Paparkan carta bar dalam bentuk melintang
+  coord_flip()
+```
+
+#### 5.4 10 kategori produk yang kerap dibeli oleh pelanggan
+```{r}
+hunter_dep2 <- hunter_c %>%
+  # Kelaskan data mengikut kategori produk
+  group_by(department) %>% 
+  # Hitung bilangan pembelian bagi setiap kategori produk
+  summarize(count = n(), .groups = "drop") %>% 
+  # Susun data dalam turutan menurun
+  arrange(desc(count)) %>% 
+  # Pilih hanya 10 kategori produk dengan bilangan terbanyak
+  slice_max(order_by = count, n = 10)
+
+hunter_dep2 %>% 
+  # Bina carta bar
+  ggplot(aes(
+    # Susun semula kategori produk mengikut bilangannya
+    x = reorder(department, count),
+    y = count
+  )) +
+  # Warnakan setiap bar dengan warna yang berlainan
+  geom_bar(stat = "identity", fill = rainbow(length(hunter_dep2$department)), color ="black") +
+  # Tambahkan tajuk pada carta
+  labs(title = "10 kategori produk yang kerap dibeli", x = "", y = "Bilangan Pembelian") +
+  # Paparkan carta bar dalam bentuk melintang
+  coord_flip()
+```
+
+#### 5.5 10 produk yang kerap diulang pembelian oleh pelanggan
+```{r}
+hunter_reordered <-hunter_c %>%
+  # Saringkan produk yang pernah dulang pembelian oleh pelanggan 
+  filter(reordered == 1) %>%
+  # Kelaskan data mengikut produk
+  group_by(product_name) %>% 
+  # Hitung bilangan pembelian bagi setiap produk
+  summarize(count = n(), .groups = "drop") %>% 
+  # Susun data dalam turutan menurun
+  arrange(desc(count)) %>% 
+  # Pilih hanya 10 produk dengan bilangan terbanyak
+  slice_max(order_by = count, n = 10)
+hunter_reordered
+
+  # Bina carta bar
+hunter_reordered %>% ggplot(aes(
+   # Susun semula produk mengikut bilangannya
+    x = reorder(product_name, count),
+    y = count
+  )) +
+  # Warnakan setiap bar dengan warna yang berlainan
+  geom_bar(stat = "identity", fill = rainbow(length(hunter_reordered$product_name)), color ="black") +
+  # Tambahkan tajuk pada carta
+  labs(title = "10 item yang kerap diulang pembelian oleh pelanggan", x = "", y = "Bilangan Pembelian") +
+  # Paparkan carta bar dalam bentuk melintang
+  coord_flip()
+```
+
+#### 5.6 10 produk yang kerap dibeli oleh pelanggan
+```{r}
+hunter_item<-hunter_c %>%
+  # Kelaskan data mengikut produk
+  group_by(product_name) %>% 
+  # Hitung bilangan pembelian bagi setiap produk
+  summarize(count = n(), .groups = "drop") %>% 
+  # Susun data dalam turutan menurun
+  arrange(desc(count)) %>% 
+  # Pilih hanya 10 produk dengan bilangan terbanyak
+  slice_max(order_by = count, n = 10) 
+hunter_item
+  # Bina carta bar
+hunter_item %>% ggplot(aes(
+    # Susun semula produk mengikut bilangannya
+    x = reorder(product_name, count),
+    y = count
+  )) +
+  # Warnakan setiap bar dengan warna yang berlainan
+  geom_bar(stat = "identity", fill = rainbow(length(hunter_item$product_name)), color ="black") +
+  # Tambahkan tajuk pada carta
+  labs(title = "10 produk yang kerap dibeli", x = "", y = "Bilangan pembelian") +
+  # Paparkan carta bar dalam bentuk melintang
+  coord_flip()
+```
+
+## Analisis Bakul Pembelian
+
+> Oleh kerana set data yang digunakan adalah besar, terdapat kemungkinan untuk menghasilkan banyak aturan sekutuan yang tidak penting. Untuk mengurangkan risiko ini, nilai ambang minimum sokongan dan keyakinan boleh ditetapkan sebelum melaksanakan analisis untuk menghasilkan aturan yang berguna dan menarik sahaja. Oleh itu, nilai ambang minimum sokongan yang digunakan ialah 0.1 manakala, nilai ambang keyakinan yang digunakan ialah 0.7.
+
+#### Algoritma Apriori
+```{r}
+## minimum support = 0.05
+start_A <- Sys.time() #Untuk mengukur masa pelaksanaan algoritma Apriori
+
+hunter_apriori<- apriori(hunter_trans, parameter = list(supp = 0.05, conf = 0.7, minlen = 2))
+hunter_ap<- sort(hunter_apriori, by="confidence", decreasing = T)
+
+end_A <- Sys.time() # 
+time_A<- as.numeric(end_A - start_A) # 
+
+## minimum support = 0.1
+start_A2 <- Sys.time() #Untuk mengukur masa pelaksanaan algoritma Apriori
+
+hunter_apriori2<- apriori(hunter_trans, parameter = list(supp = 0.1, conf = 0.7, minlen = 2))
+hunter_ap2<- sort(hunter_apriori2, by="confidence", decreasing = T)
+
+end_A2 <- Sys.time() # 
+time_A2 <- as.numeric(end_A2 - start_A2) # 
+
+arules::inspect(hunter_apriori2)   
+arules::inspect(hunter_ap2)
+
+## minimum support = 0.15
+start_A3 <- Sys.time() #Untuk mengukur masa pelaksanaan algoritma Apriori
+
+hunter_apriori3<- apriori(hunter_trans, parameter = list(supp = 0.15, conf = 0.7, minlen = 2))
+hunter_ap3<- sort(hunter_apriori3, by="confidence", decreasing = T)
+
+end_A3 <- Sys.time() # 
+time_A3 <- as.numeric(end_A3 - start_A3) # 
+
+## minimum support = 0.2
+start_A4 <- Sys.time() #Untuk mengukur masa pelaksanaan algoritma Apriori
+
+hunter_apriori4<- apriori(hunter_trans, parameter = list(supp = 0.2, conf = 0.7, minlen = 2))
+hunter_ap4<- sort(hunter_apriori4, by="confidence", decreasing = T)
+
+end_A4 <- Sys.time() # 
+time_A4 <- as.numeric(end_A4 - start_A4) # 
+
+## minimum support = 0.25
+start_A5 <- Sys.time() #Untuk mengukur masa pelaksanaan algoritma Apriori
+
+hunter_apriori5<- apriori(hunter_trans, parameter = list(supp = 0.25, conf = 0.7, minlen = 2))
+hunter_ap5<- sort(hunter_apriori5, by="confidence", decreasing = T)
+
+end_A5 <- Sys.time() # 
+time_A5 <- as.numeric(end_A5 - start_A5) # 
+
+## minimum support = 0.3
+start_A6 <- Sys.time() #Untuk mengukur masa pelaksanaan algoritma Apriori
+
+hunter_apriori6<- apriori(hunter_trans, parameter = list(supp = 0.3, conf = 0.7, minlen = 2))
+hunter_ap6<- sort(hunter_apriori6, by="confidence", decreasing = T)
+
+end_A6 <- Sys.time() # 
+time_A6 <- as.numeric(end_A6 - start_A6) # 
+```
+
+#### Algoritma ECLAT
+```{r}
+## Minimum support = 0.05
+start_E <- Sys.time() # Untuk mengukur masa pelaksanaan algoritma ECLAT
+
+hunter_ECLAT<- eclat(data = hunter_trans, parameter = list(supp = 0.05, minlen = 2))
+hunter_E<- sort(hunter_ECLAT, by="support", decreasing = T)
+end_E <- Sys.time() #
+time_E<- as.numeric(end_E - start_E) #
+
+## Minimum support = 0.1
+start_E2 <- Sys.time() # Untuk mengukur masa pelaksanaan algoritma ECLAT
+
+hunter_ECLAT2<- eclat(data = hunter_trans, parameter = list(supp = 0.1, minlen = 2))
+hunter_E2<- sort(hunter_ECLAT2, by="support", decreasing = T)
+end_E2 <- Sys.time() #
+time_E2<- as.numeric(end_E2 - start_E2) #
+
+ECLAT_rules <- ruleInduction(hunter_ECLAT2, transactions = hunter_trans, confidence = 0.7)
+ECLAT_rules
+
+arules::inspect(ECLAT_rules)
+plot(hunter_ECLAT, method = "graph")
+
+## Minimum support = 0.15
+start_E3 <- Sys.time() # Untuk mengukur masa pelaksanaan algoritma ECLAT
+
+hunter_ECLAT3<- eclat(data = hunter_trans, parameter = list(supp = 0.15, minlen = 2))
+hunter_E3<- sort(hunter_ECLAT3, by="support", decreasing = T)
+end_E3 <- Sys.time() #
+time_E3<- as.numeric(end_E3 - start_E3) #
+
+## Minimum support = 0.2
+start_E4 <- Sys.time() # Untuk mengukur masa pelaksanaan algoritma ECLAT
+
+hunter_ECLAT4<- eclat(data = hunter_trans, parameter = list(supp = 0.2, minlen = 2))
+hunter_E4<- sort(hunter_ECLAT4, by="support", decreasing = T)
+end_E4 <- Sys.time() #
+time_E4<- as.numeric(end_E4 - start_E4) #
+
+## Minimum support = 0.25
+start_E5 <- Sys.time() # Untuk mengukur masa pelaksanaan algoritma ECLAT
+
+hunter_ECLAT5<- eclat(data = hunter_trans, parameter = list(supp = 0.25, minlen = 2))
+hunter_E5<- sort(hunter_ECLAT5, by="support", decreasing = T)
+end_E5 <- Sys.time() #
+time_E5<- as.numeric(end_E5 - start_E5) #
+
+## Minimum support = 0.3
+start_E6 <- Sys.time() # Untuk mengukur masa pelaksanaan algoritma ECLAT
+
+hunter_ECLAT6<- eclat(data = hunter_trans, parameter = list(supp = 0.3, minlen = 2))
+hunter_E6<- sort(hunter_ECLAT6, by="support", decreasing = T)
+end_E6 <- Sys.time() #
+time_E6<- as.numeric(end_E6 - start_E6) #
+```
+
+## Penilaian prestasi algoritma Analisis Bakul Pemasaran
+
+> Prestasi setiap algoritma diukur berdasarkan satu kriteria penting, iaitu waktu yang diperlukan untuk menjalankan algoritma (masa pelaksanaan algoritma).
+
+```{r}
+# Masa pelaksanaan algoritma Apriori
+time_A
+time_A2
+time_A3
+time_A4
+time_A5
+time_A6
+
+# Masa pelaksanaan algoritma ECLAT
+time_E
+time_E2
+time_E3
+time_E4
+time_E5
+time_E6
+
+Min_sup <- c(0.05,0.1,0.15,0.2,0.25,0.3)
+time_Apriori <- c(time_A, time_A2, time_A3, time_A4, time_A5,time_A6)
+time_ECLAT <- c(time_E, time_E2, time_E3, time_E4, time_E5,time_E6)
+time_MBA<- data.frame(Min_sup,time_Apriori,time_ECLAT)
+
+ggplot(time_MBA, aes(Min_sup)) +                  
+  geom_line(aes(y=time_Apriori, colour="time Apriori")) + 
+  geom_line(aes(y=time_ECLAT, colour="time ECLAT")) +
+  ylab("Time (second)")
+```
+
+
+```{r}
+t.test(time_MBA$time_Apriori,time_MBA$time_ECLAT)
+```
+
